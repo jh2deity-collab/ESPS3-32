@@ -30,8 +30,11 @@
   <pre style="margin:0 0 14px;padding:12px 14px;background:#f2f2ef;border-radius:8px;
        overflow:auto;font-size:13px">python3 tools/serve.py
 
-# 윈도우에서 python3 를 못 찾으면
-py -3 tools/serve.py</pre>
+# 윈도우
+tools\serve.bat          (탐색기에서 더블클릭해도 됩니다)
+
+# 윈도우에 파이썬이 없다면
+powershell -ExecutionPolicy Bypass -File tools\serve.ps1</pre>
   <p style="margin:0 0 6px">그다음 브라우저에서 <b>http://localhost:8000</b> 을 엽니다.</p>
   <p style="margin:14px 0 0;font-size:13.5px;color:#5a5a55">
     이미 서버로 열었는데도 이 안내가 보인다면, 브라우저 개발자도구(F12)의

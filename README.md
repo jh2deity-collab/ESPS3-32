@@ -33,16 +33,35 @@ ESP32-S3-WROOM-1 **N8R2** 기기의 입출력을 브라우저에서 강제로 �
 
 ### 1. 웹 콘솔 실행
 
+**macOS / Linux**
+
 ```bash
 python3 tools/serve.py          # http://localhost:8000 이 열린다
+```
 
-# 윈도우에서 python3 를 못 찾으면
-py -3 tools\serve.py            # 또는 탐색기에서 tools\serve.bat 더블클릭
+**윈도우** — 탐색기에서 `tools\serve.bat` 을 더블클릭하거나:
+
+```bat
+tools\serve.bat
+```
+
+이 배치 파일이 알아서 처리한다.
+
+- 윈도우에는 `python3` 이라는 명령이 없다(`py -3` 또는 `python` 이다).
+- 파이썬을 안 깔았어도 된다. 없으면 **윈도우에 기본 탑재된 PowerShell** 로
+  서버를 띄운다(`tools\serve.ps1`).
+- 명령 프롬프트에 `python` 을 치면 마이크로소프트 스토어만 열리는 경우가
+  있는데(윈도우 기본 껍데기 파일), 그건 걸러내고 진짜 파이썬만 찾는다.
+
+PowerShell 판을 직접 실행하려면:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\serve.ps1
 ```
 
 > `index.html` 을 더블클릭해서 여는 방식(`file://`)은 **동작하지 않는다.**
 > 브라우저가 자바스크립트 모듈 로딩을 막기 때문이며, 그렇게 열면 화면에
-> 안내가 뜬다. 반드시 위 명령으로 띄운 주소로 열 것.
+> 안내가 뜬다. 반드시 위 방법으로 띄운 주소(`http://localhost:8000`)로 열 것.
 
 > **`http://localhost` 로 여는 것이 중요하다.**
 > USB(Web Serial)와 블루투스(Web Bluetooth)는 보안 컨텍스트에서만 동작하는데
@@ -125,7 +144,10 @@ cp firmware/local.example/upload-port.ini firmware/local/   # 포트 고정
 | 증상 | 원인 | 해결 |
 |---|---|---|
 | 화면이 하얗게 비거나 "화면을 불러오지 못했습니다" 안내가 뜬다 | `index.html` 을 더블클릭해 `file://` 로 열었다. 브라우저가 모듈을 막는다 | `python3 tools/serve.py` 로 띄우고 `http://localhost:8000` 으로 열기 |
-| `python3` 명령을 찾을 수 없다 (윈도우) | 윈도우에는 `python3` 이름이 없다 | `py -3 tools/serve.py` 또는 `tools\serve.bat` 더블클릭 |
+| `python3`은(는) 내부 또는 외부 명령이 아닙니다 (윈도우) | 윈도우에는 `python3` 이라는 이름이 없다 | `tools\serve.bat` 더블클릭 |
+| `python` 을 치면 마이크로소프트 스토어만 열린다 | 윈도우 기본 껍데기 파일(WindowsApps)이 먼저 잡힌다 | `tools\serve.bat` 이 이를 걸러낸다. 그냥 배치 파일로 실행할 것 |
+| 파이썬이 아예 없다 (윈도우) | 설치 안 함 | `tools\serve.bat` 이 PowerShell 판으로 대신 띄운다. 설치는 선택 |
+| `이 시스템에서 스크립트를 실행할 수 없으므로` (PowerShell) | 실행 정책 제한 | `powershell -ExecutionPolicy Bypass -File tools\serve.ps1` 로 실행 (배치 파일은 이미 이렇게 한다) |
 | 포트가 이미 사용 중이라고 나온다 | 8000 을 다른 프로그램이 쓰고 있다 | 서버가 알아서 다음 빈 포트를 잡는다. 화면에 찍힌 주소를 그대로 열 것 |
 | `USB` / `블루투스` 버튼이 회색이다 | 브라우저가 지원하지 않거나 보안 컨텍스트가 아니다 | 데스크톱 Chrome/Edge 로, `http://localhost` 또는 `https://` 에서 열기. 버튼에 마우스를 올리면 이유가 보인다 |
 | 연결 방식이 다 회색이고 시뮬레이터만 된다 | `127.0.0.1` 이 아닌 LAN 주소(예: `192.168.x.x:8000`)로 열었다 | 반드시 `localhost` 로 열 것. LAN 주소는 보안 컨텍스트가 아니다 |
@@ -324,7 +346,7 @@ web/                 정적 웹 콘솔 (빌드 도구 없음, ES 모듈 그대�
   js/app.js            화면 제어
   vendor/esptool-js/   Espressif 공식 플래셔 (Apache-2.0, 벤더링)
 docs/protocol.md     통신 프로토콜 전체 명세
-tools/               로컬 서버 · 자체 점검 스크립트
+tools/               로컬 서버(파이썬/PowerShell/윈도우 배치) · 자체 점검
 ```
 
 ## 점검 실행
