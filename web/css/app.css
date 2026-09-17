@@ -230,6 +230,39 @@ main {
 }
 .empty { color: var(--ink-3); font-size: 12.5px; padding: 10px 2px; }
 
+/* --- 진행 막대 (데이터 끝을 둥글게, 바닥선에 고정) ----------------------- */
+.progress {
+  height: 10px; background: var(--surface-3); border-radius: 5px;
+  overflow: hidden; margin: 2px 0 6px;
+}
+.progress > i {
+  display: block; height: 100%; width: 0;
+  background: var(--accent); border-radius: 5px;
+  transition: width .18s linear;
+}
+.progress.done > i { background: var(--good); }
+.progress.err > i { background: var(--bad); }
+
+/* --- 다운로드 탭 --------------------------------------------------------- */
+.dl-pane { display: flex; flex-direction: column; gap: 9px; }
+.dl-pane[hidden] { display: none; }
+.filepick { display: inline-flex; }
+.btnlike {
+  display: inline-block; padding: 5px 10px; border-radius: 6px;
+  border: 1px solid var(--line); background: var(--surface-2); cursor: pointer; font-size: 12px;
+}
+.filepick:hover .btnlike { border-color: var(--ink-3); }
+
+.part-row {
+  display: grid; grid-template-columns: 92px 1fr auto auto;
+  align-items: center; gap: 6px; padding: 4px 0;
+}
+.part-row input[type="text"] { font-family: var(--mono); width: 92px; padding: 4px 6px; font-size: 12px; }
+.part-row .pname { font-size: 12px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.part-row .pname.set { color: var(--ink); }
+.part-row .psize { font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); white-space: nowrap; }
+.part-row .phint { font-size: 11px; color: var(--ink-3); }
+
 /* --- 표 ------------------------------------------------------------------- */
 table.kv { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 table.kv th, table.kv td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }

@@ -1,5 +1,6 @@
 import { Transport } from './base.js';
 import { ALL_PINS, meta, isAdc, isBlocked } from '../pinmap.js';
+import { Md5 } from '../md5.js';
 
 // ---------------------------------------------------------------------------
 //  시뮬레이터 - 펌웨어 동작을 브라우저 안에서 흉내 낸다.
@@ -27,6 +28,27 @@ export class MockTransport extends Transport {
       _stable: -1, _lastRaw: -1, _edgeAt: 0, _blinkAt: 0, _blinkOn: false,
     };
     this.watchMs = 50;
+
+    // OTA 시뮬레이션. 받은 바이트를 들고 있지 않고 MD5 만 굴려서,
+    // 웹이 계산한 해시와 실제로 도착한 바이트가 일치하는지 검사한다.
+    this.ota = {
+      state: 'idle', total: 0, received: 0, md5: '', via: '', error: '',
+      hash: null, maxSize: 3 * 1024 * 1024,
+    };
+  }
+
+  // 펌웨어의 WebSocket 처럼 바이너리 프레임을 OTA 데이터로 받는다
+  get supportsBinary() { return true; }
+  get bufferedAmount() { return 0; }
+
+  async sendBinary(bytes) {
+    setTimeout(() => {
+      if (this.ota.state !== 'receiving') {
+        this._emit('ota.done', { ok: false, error: 'OTA 를 시작하지 않은 채로 바이너리 데이터가 들어왔습니다' });
+        return;
+      }
+      this._otaWrite(new Uint8Array(bytes));
+    }, 2);
   }
 
   _pin(p) {
@@ -134,6 +156,7 @@ export class MockTransport extends Transport {
       transports: { usb: false, ble: false, wifi: false, mock: true },
       net: { mode: 'sim', ip: '192.168.0.42', ssid: 'SIMULATED', host: 'esps3-test-sim.local', clients: 1 },
       bleName: 'ESPS3-TEST-SIM',
+      partition: { running: 'app0', size: 0x330000, otaCapable: true, next: 'app1', nextSize: 0x330000 },
     };
   }
 
@@ -341,6 +364,78 @@ export class MockTransport extends Transport {
         return this._reply(id, this._appStatus());
       }
 
+      case 'ota.status':
+        return this._reply(id, this._otaStatus());
+
+      case 'ota.begin': {
+        const o = this.ota;
+        if (o.state === 'receiving') return this._error(id, `이미 OTA 가 진행 중입니다(${o.via}).`);
+        const size = a.size | 0;
+        const md5 = a.md5 || '';
+        if (size <= 0) return this._error(id, '이미지 크기가 0 입니다');
+        if (size > o.maxSize) return this._error(id, '이미지가 OTA 파티션보다 큽니다');
+        if (md5 && !/^[0-9a-fA-F]{32}$/.test(md5)) {
+          return this._error(id, 'MD5 는 16진수 32자여야 합니다(검증을 건너뛰려면 비워 두세요)');
+        }
+        Object.assign(o, {
+          state: 'receiving', total: size, received: 0, md5: md5.toLowerCase(),
+          via: 'mock', error: '', hash: new Md5(), _lastPct: -1,
+        });
+        this._emit('ota.begin', this._otaStatus());
+        return this._reply(id, this._otaStatus());
+      }
+
+      case 'ota.data': {
+        if (this.ota.state !== 'receiving') return this._error(id, 'OTA 가 시작되지 않았습니다');
+        if (typeof a.b64 !== 'string') return this._error(id, "'b64' 인자가 필요합니다");
+        let bin;
+        try {
+          bin = atob(a.b64);
+        } catch {
+          this._otaFail('base64 조각을 해석하지 못했습니다');
+          return this._error(id, this.ota.error);
+        }
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        if (!this._otaWrite(bytes)) return this._error(id, this.ota.error);
+        return this._reply(id, { n: this.ota.received });
+      }
+
+      case 'ota.end': {
+        const o = this.ota;
+        if (o.state !== 'receiving') return this._error(id, 'OTA 가 진행 중이 아닙니다');
+        if (o.received !== o.total) {
+          this._otaFail(`받은 크기가 맞지 않습니다(${o.received}/${o.total})`);
+          this._emit('ota.done', { ok: false, error: o.error });
+          return this._error(id, o.error);
+        }
+        const got = o.hash.hex();
+        if (o.md5 && got !== o.md5) {
+          this._otaFail(`검증 실패: MD5 불일치 (기대 ${o.md5}, 실제 ${got})`);
+          this._emit('ota.done', { ok: false, error: o.error });
+          return this._error(id, o.error);
+        }
+        o.state = 'success';
+        this._emit('ota.done', { ok: true, rebooting: true });
+        this._reply(id, { ...this._otaStatus(), rebooting: true });
+        // 재부팅 흉내: 상태를 초기화하고 hello 를 다시 보낸다
+        setTimeout(() => {
+          this.pins.clear();
+          this.startedAt = Date.now();
+          this.ota = { ...this.ota, state: 'idle', received: 0, total: 0, hash: null };
+          this._emit('hello', { via: 'mock', ...this._sysInfo() });
+        }, 500);
+        return;
+      }
+
+      case 'ota.abort': {
+        if (this.ota.state === 'receiving') {
+          this._otaFail('사용자가 취소했습니다');
+          this._emit('ota.done', { ok: false, error: this.ota.error });
+        }
+        return this._reply(id, this._otaStatus());
+      }
+
       case 'wifi.status':
         return this._reply(id, {
           mode: 'sim', connected: true, ip: '192.168.0.42', ssid: 'SIMULATED',
@@ -366,6 +461,42 @@ export class MockTransport extends Transport {
       default:
         return this._error(id, `알 수 없는 명령: ${cmd}`);
     }
+  }
+
+  _otaStatus() {
+    const o = this.ota;
+    const r = {
+      state: o.state, received: o.received, total: o.total,
+      percent: o.total ? Math.min(100, Math.round((o.received / o.total) * 100)) : 0,
+      via: o.via, otaCapable: true, maxSize: o.maxSize,
+      maxChunk: Math.floor((4096 - 128) / 4) * 3,
+    };
+    if (o.state === 'failed') r.error = o.error;
+    return r;
+  }
+
+  _otaFail(reason) {
+    this.ota.state = 'failed';
+    this.ota.error = reason;
+    this.ota.hash = null;
+  }
+
+  /** 도착한 바이트를 MD5 에 흘려 넣는다 (펌웨어의 Update.write 에 해당) */
+  _otaWrite(bytes) {
+    const o = this.ota;
+    if (o.received + bytes.length > o.total) {
+      this._otaFail('보낸 바이트가 선언한 크기를 넘었습니다');
+      this._emit('ota.done', { ok: false, error: o.error });
+      return false;
+    }
+    o.hash.update(bytes);
+    o.received += bytes.length;
+    const pct = Math.round((o.received / o.total) * 100);
+    if (pct !== o._lastPct) {
+      o._lastPct = pct;
+      this._emit('ota.progress', { received: o.received, total: o.total, percent: pct, via: o.via });
+    }
+    return true;
   }
 
   _appStatus() {

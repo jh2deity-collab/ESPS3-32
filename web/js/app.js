@@ -8,6 +8,8 @@ import { WifiTransport } from './transports/wifi.js';
 import { MockTransport } from './transports/mock.js';
 import { ALL_PINS, SAFE_PINS, meta, isAdc, isBlocked } from './pinmap.js';
 import { parseScript, SequenceRunner, PRESETS } from './sequence.js';
+import { uploadFirmware, OtaAbort, estimateSeconds, formatBytes, formatDuration } from './ota.js';
+import * as flasher from './flasher.js';
 
 const $  = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
@@ -48,6 +50,13 @@ const state = {
   pollTimer: null,
   series: new Map(),           // pin -> [{t, v}]
   lastSeq: null,
+  dl: {                        // 다운로드 탭 상태
+    mode: 'flash',
+    parts: [],                 // [{address, file, bytes, name, hint}]
+    otaFile: null,
+    busy: false,
+    abort: false,
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -189,6 +198,7 @@ function onOpen({ description }) {
   }
   startPolling();
   refreshAll();
+  renderOtaInfo();
 }
 
 function onClose({ reason }) {
@@ -200,6 +210,7 @@ function onClose({ reason }) {
   stopPolling();
   setStatus(reason || '연결이 끊어졌습니다');
   logRaw('warn', reason || '연결 종료');
+  renderOtaInfo();
 }
 
 // ---------------------------------------------------------------------------
@@ -1060,6 +1071,328 @@ async function wifiScan() {
 }
 
 // ---------------------------------------------------------------------------
+//  다운로드 탭 - 기기에 펌웨어 내려받기
+//
+//  두 가지 경로를 제공한다.
+//   · USB 전체 플래시: ROM 부트로더와 직접 이야기한다. 빈 칩에도 구울 수 있고
+//     부트로더·파티션까지 통째로 바꾼다. 콘솔의 USB 연결과 포트를 공유하므로
+//     굽기 전에 콘솔 연결을 끊어야 한다.
+//   · OTA: 지금 연결된 채널(USB/BLE/WiFi) 그대로 앱 파티션만 갱신한다.
+// ---------------------------------------------------------------------------
+const dlLog = (msg, level) => appendLog($('#dlLog'), level || 'rx', msg);
+
+function setDlMode(mode) {
+  state.dl.mode = mode;
+  $$('#dlMode button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.m === mode)));
+  $('#dlFlash').hidden = mode !== 'flash';
+  $('#dlOta').hidden = mode !== 'ota';
+  updateDlHint();
+  if (mode === 'ota') renderOtaInfo();
+}
+
+function updateDlHint() {
+  const hint = $('#dlHint');
+  if (state.dl.mode === 'flash') {
+    hint.innerHTML = flasher.isSupported()
+      ? 'ROM 부트로더로 <b>전체</b>를 굽습니다. 빈 칩이나 펌웨어가 망가진 기기도 복구할 수 있습니다. ' +
+        'USB 케이블을 <b>네이티브 USB 포트</b>에 연결하세요.'
+      : '이 브라우저는 Web Serial 을 지원하지 않아 USB 플래시를 쓸 수 없습니다. ' +
+        '데스크톱 Chrome/Edge 에서 http://localhost 로 열어 주세요.';
+  } else {
+    hint.innerHTML = '지금 연결된 채널로 <b>앱 파티션만</b> 갱신합니다. 기기가 이 펌웨어로 동작 중이어야 하며, ' +
+                     '부트로더·파티션 테이블은 바뀌지 않습니다.';
+  }
+}
+
+// --- 진행 표시 -------------------------------------------------------------
+function showProgress(on) {
+  $('#dlProgress').hidden = !on;
+  if (on) {
+    $('#dlProgress .progress').className = 'progress';
+    setProgress(0, '');
+  }
+}
+
+function setProgress(percent, detail, kind) {
+  const pct = clamp(Math.round(percent), 0, 100);
+  $('#dlBar').style.width = `${pct}%`;
+  $('#dlPct').textContent = `${pct}%`;
+  $('#dlDetail').textContent = detail || '';
+  const bar = $('#dlProgress .progress');
+  bar.className = `progress${kind ? ' ' + kind : ''}`;
+  bar.setAttribute('aria-valuenow', String(pct));
+}
+
+// --- USB 전체 플래시 --------------------------------------------------------
+function resetFlashParts() {
+  state.dl.parts = flasher.DEFAULT_LAYOUT.map((l) => ({
+    address: l.address, name: l.name, hint: l.hint, file: null, bytes: null,
+  }));
+  renderFlashParts();
+}
+
+function renderFlashParts() {
+  const box = $('#flashParts');
+  box.innerHTML = '';
+  state.dl.parts.forEach((part, idx) => {
+    const row = el('div', 'part-row');
+
+    const addr = el('input');
+    addr.type = 'text';
+    addr.value = flasher.formatAddress(part.address);
+    addr.title = '플래시 주소. 0x 를 생략해도 16진수로 읽습니다.';
+    addr.setAttribute('aria-label', `${idx + 1}번 파일 주소`);
+    addr.onchange = () => {
+      try {
+        part.address = flasher.parseAddress(addr.value);
+        addr.value = flasher.formatAddress(part.address);   // 해석 결과를 되돌려 보여 준다
+        addr.style.color = '';
+      } catch (err) {
+        addr.style.color = 'var(--bad-text)';
+        dlLog(err.message, 'err');
+      }
+    };
+    row.appendChild(addr);
+
+    const pick = el('label', 'filepick grow');
+    const input = el('input');
+    input.type = 'file';
+    input.accept = '.bin';
+    input.hidden = true;
+    input.onchange = async () => {
+      const f = input.files[0];
+      if (!f) return;
+      part.file = f;
+      part.name = f.name;
+      part.bytes = null;
+      renderFlashParts();
+    };
+    const label = el('span', `pname${part.file ? ' set' : ''}`, part.file ? part.name : `${part.name} 선택…`);
+    label.style.cursor = 'pointer';
+    pick.appendChild(input);
+    pick.appendChild(label);
+    row.appendChild(pick);
+
+    row.appendChild(el('span', 'psize', part.file ? formatBytes(part.file.size) : (part.hint || '')));
+
+    const del = el('button', 'sm', '✕');
+    del.title = '이 행 제거';
+    del.onclick = () => {
+      state.dl.parts.splice(idx, 1);
+      renderFlashParts();
+    };
+    row.appendChild(del);
+
+    box.appendChild(row);
+  });
+
+  if (!state.dl.parts.length) {
+    box.appendChild(el('div', 'empty', '행을 추가하고 파일을 선택하세요.'));
+  }
+}
+
+/** 여러 파일을 한 번에 받아 이름으로 주소를 맞춘다 (PlatformIO 산출물 기준) */
+function assignPickedFiles(files) {
+  let matched = 0;
+  [...files].forEach((f) => {
+    const known = flasher.DEFAULT_LAYOUT.find((l) => l.name.toLowerCase() === f.name.toLowerCase());
+    let part = state.dl.parts.find((p) => p.name.toLowerCase() === f.name.toLowerCase());
+    if (!part && known) {
+      part = state.dl.parts.find((p) => p.address === known.address);
+    }
+    if (part) {
+      part.file = f;
+      part.name = f.name;
+      matched++;
+    } else {
+      // 이름을 모르는 파일은 주소를 비운 채 행만 만들어 사용자가 정하게 한다
+      state.dl.parts.push({ address: 0x10000, name: f.name, hint: '주소를 확인하세요', file: f, bytes: null });
+      dlLog(`'${f.name}' 의 주소를 알 수 없어 0x10000 으로 넣었습니다. 확인해 주세요.`, 'warn');
+    }
+  });
+  renderFlashParts();
+  if (matched) dlLog(`${matched}개 파일을 이름으로 맞췄습니다`, 'ok');
+}
+
+async function startFlash() {
+  const parts = state.dl.parts.filter((p) => p.file);
+  if (!parts.length) { dlLog('구울 파일을 선택하세요', 'err'); return; }
+
+  // 콘솔이 USB 로 붙어 있으면 포트를 점유하고 있어 플래시할 수 없다
+  if (dev.connected && dev.transportId === 'usb') {
+    if (!confirm('USB 포트를 플래셔가 써야 합니다. 콘솔 연결을 먼저 해제할까요?')) return;
+    await dev.disconnect();
+  }
+
+  state.dl.busy = true;
+  state.dl.abort = false;
+  $('#btnFlash').disabled = true;
+  $('#btnFlashStop').disabled = false;
+  showProgress(true);
+
+  const loaded = [];
+  try {
+    for (const p of parts) {
+      loaded.push({ address: p.address, name: p.name, data: await flasher.readFileBytes(p.file) });
+    }
+    const totalBytes = loaded.reduce((n, p) => n + p.data.length, 0);
+    dlLog(`${loaded.map((p) => `${flasher.formatAddress(p.address)} ${p.name}`).join(', ')}`);
+
+    const startedAt = performance.now();
+    let doneBytes = 0;
+    let curIndex = -1;
+
+    await flasher.flashParts(loaded, {
+      baudRate: Number($('#flashBaud').value),
+      eraseAll: $('#eraseAll').checked,
+      shouldAbort: () => state.dl.abort,
+      onLog: (msg, level) => dlLog(msg, level),
+      onProgress: ({ fileIndex, written, total, name }) => {
+        if (fileIndex !== curIndex) {
+          if (curIndex >= 0) doneBytes += loaded[curIndex]?.data.length || 0;
+          curIndex = fileIndex;
+        }
+        // 파일별 진행을 전체 대비로 환산한다(압축 후 크기 기준이라 근사값)
+        const fileBytes = loaded[fileIndex]?.data.length || 0;
+        const within = total ? (written / total) * fileBytes : 0;
+        const pct = totalBytes ? ((doneBytes + within) / totalBytes) * 100 : 0;
+        const elapsed = (performance.now() - startedAt) / 1000;
+        setProgress(pct, `${name} · ${fileIndex + 1}/${loaded.length} · ${formatDuration(elapsed)} 경과`);
+      },
+    });
+
+    const elapsed = (performance.now() - startedAt) / 1000;
+    setProgress(100, `완료 · ${formatBytes(totalBytes)} / ${formatDuration(elapsed)}`, 'done');
+    dlLog('플래시 완료. 기기가 새 펌웨어로 재시작했습니다.', 'ok');
+    setStatus('플래시 완료', 'ok');
+
+  } catch (err) {
+    const aborted = err instanceof flasher.FlashAbort;
+    setProgress(0, aborted ? '중지했습니다' : '실패', aborted ? '' : 'err');
+    dlLog(aborted ? '사용자가 중지했습니다' : `플래시 실패: ${err.message}`, aborted ? 'warn' : 'err');
+    if (!aborted) setStatus(`플래시 실패: ${err.message}`, 'err');
+  } finally {
+    state.dl.busy = false;
+    $('#btnFlash').disabled = false;
+    $('#btnFlashStop').disabled = true;
+  }
+}
+
+// --- OTA -------------------------------------------------------------------
+function renderOtaInfo() {
+  const tb = $('#otaInfo');
+  tb.innerHTML = '';
+  const f = state.dl.otaFile;
+  const rows = [];
+
+  if (!dev.connected) {
+    rows.push(['연결', '연결되어 있지 않습니다 — 먼저 위에서 연결하세요']);
+  } else {
+    const t = TRANSPORTS.find((T) => T.id === dev.transportId);
+    rows.push(['전송 채널', t ? t.label : dev.transportId]);
+    const part = dev.info?.partition;
+    if (part) {
+      rows.push(['실행 중인 파티션', `${part.running || '-'} → ${part.next || '-'} 에 기록`]);
+      if (part.otaCapable === false) rows.push(['주의', 'OTA 파티션이 없어 USB 전체 플래시를 써야 합니다']);
+    }
+  }
+
+  if (f) {
+    rows.push(['파일', `${f.name} · ${formatBytes(f.size)}`]);
+    if (dev.connected) {
+      const eta = estimateSeconds(dev.transportId, f.size);
+      rows.push(['예상 소요 시간', `약 ${formatDuration(eta)}`
+        + (dev.transportId === 'ble' ? ' — BLE 는 느립니다. 가능하면 USB 나 WiFi 를 쓰세요.' : '')]);
+    }
+  }
+
+  rows.forEach(([k, v]) => {
+    const tr = el('tr');
+    tr.appendChild(el('th', null, k));
+    tr.appendChild(el('td', null, v));
+    tb.appendChild(tr);
+  });
+}
+
+async function startOta() {
+  const f = state.dl.otaFile;
+  if (!f) { dlLog('펌웨어 파일을 선택하세요', 'err'); return; }
+  if (!dev.connected) { dlLog('먼저 장치에 연결하세요', 'err'); return; }
+
+  state.dl.busy = true;
+  state.dl.abort = false;
+  $('#btnOta').disabled = true;
+  $('#btnOtaStop').disabled = false;
+  showProgress(true);
+  stopPolling();                     // 업로드 중에는 상태 폴링이 대역을 뺏지 않게 한다
+
+  try {
+    const bytes = new Uint8Array(await f.arrayBuffer());
+    const res = await uploadFirmware(dev, bytes, {
+      onLog: (msg, level) => dlLog(msg, level),
+      shouldAbort: () => state.dl.abort,
+      onProgress: ({ sent, total, percent, bps, etaSec }) => {
+        setProgress(percent,
+          `${formatBytes(sent)} / ${formatBytes(total)} · ${formatBytes(Math.round(bps))}/s · ` +
+          `남은 시간 ${formatDuration(etaSec)}`);
+      },
+    });
+    setProgress(100, `완료 · ${formatBytes(res.bytes)} / ${formatDuration(res.elapsedSec)}`, 'done');
+    dlLog('기기가 새 펌웨어로 재부팅합니다. 잠시 뒤 다시 연결하세요.', 'ok');
+    setStatus('OTA 업데이트 완료 — 기기 재부팅 중', 'ok');
+
+  } catch (err) {
+    const aborted = err instanceof OtaAbort;
+    setProgress(0, aborted ? '취소했습니다' : '실패', aborted ? '' : 'err');
+    dlLog(aborted ? '사용자가 취소했습니다' : `OTA 실패: ${err.message}`, aborted ? 'warn' : 'err');
+    if (!aborted) setStatus(`OTA 실패: ${err.message}`, 'err');
+  } finally {
+    state.dl.busy = false;
+    $('#btnOta').disabled = false;
+    $('#btnOtaStop').disabled = true;
+    startPolling();
+  }
+}
+
+function wireDownloadTab() {
+  $('#dlMode').addEventListener('click', (ev) => {
+    const b = ev.target.closest('button[data-m]');
+    if (b) setDlMode(b.dataset.m);
+  });
+
+  flasher.BAUD_RATES.forEach((b) => {
+    const o = el('option', null, `${b} bps`);
+    o.value = b;
+    $('#flashBaud').appendChild(o);
+  });
+
+  resetFlashParts();
+  $('#btnAddPart').onclick = () => {
+    state.dl.parts.push({ address: 0x10000, name: '파일', hint: '', file: null, bytes: null });
+    renderFlashParts();
+  };
+  $('#btnResetParts').onclick = resetFlashParts;
+  $('#flashPick').onchange = (e) => {
+    assignPickedFiles(e.target.files);
+    e.target.value = '';
+  };
+  $('#btnFlash').onclick = startFlash;
+  $('#btnFlashStop').onclick = () => { state.dl.abort = true; $('#btnFlashStop').disabled = true; };
+
+  $('#otaFile').onchange = (e) => {
+    state.dl.otaFile = e.target.files[0] || null;
+    $('#otaFileName').textContent = state.dl.otaFile
+      ? `${state.dl.otaFile.name} · ${formatBytes(state.dl.otaFile.size)}`
+      : '선택된 파일 없음';
+    renderOtaInfo();
+  };
+  $('#btnOta').onclick = startOta;
+  $('#btnOtaStop').onclick = () => { state.dl.abort = true; $('#btnOtaStop').disabled = true; };
+
+  setDlMode(flasher.isSupported() ? 'flash' : 'ota');
+}
+
+// ---------------------------------------------------------------------------
 //  장치 이벤트 구독
 // ---------------------------------------------------------------------------
 function wireDevice() {
@@ -1097,6 +1430,16 @@ function wireDevice() {
         renderAppStatus(data);
         fillAppForm(data);
         logEvent('evt', `앱 로직: 릴레이 ${data.relay ? 'ON' : 'OFF'} · 경보 ${data.alarm ? '있음' : '없음'} · 누름 ${data.presses}`);
+        break;
+      case 'ota.progress':
+        // 장치가 실제로 받은 양. 화면 막대는 보낸 양 기준이라 로그로만 남긴다.
+        if (data.percent % 25 === 0) logEvent('evt', `OTA 수신 ${data.percent}% (${data.via})`);
+        break;
+      case 'ota.begin':
+        logEvent('ok', `OTA 시작: ${formatBytes(data.total || 0)} (${data.via})`);
+        break;
+      case 'ota.done':
+        logEvent(data.ok ? 'ok' : 'err', data.ok ? 'OTA 완료 — 재부팅합니다' : `OTA 실패: ${data.error}`);
         break;
       case 'io.reset':
         logEvent('warn', '핀이 초기화되었습니다');
@@ -1285,6 +1628,7 @@ function init() {
   buildTransportSelector();
   buildConnOptions();
   wireUi();
+  wireDownloadTab();
   wireDevice();
   setupChartHover();
   checkEnvironment();

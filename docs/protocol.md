@@ -19,6 +19,7 @@
 * `id` 는 응답을 짝지어 주는 값이다. 생략하면 응답에도 `id` 가 없다.
 * `args` 는 생략 가능하다.
 * `ts` 는 장치 부팅 후 경과 밀리초다.
+* 한 줄은 최대 4KB 다(`MAX_LINE_LEN`). OTA 조각 크기가 여기에 묶인다.
 
 ## 핀 상태 객체
 
@@ -104,6 +105,49 @@ ADC 는 노이즈 때문에 **32 이상 변했을 때만** 보고한다.
 | `app.config` | `enabled`, `buttonPin`, `relayPin`, `ledPin`, `sensorPin`, `alarmPin`, `activeLow`, `debounceMs`, `threshold` | 구성 변경 (준 항목만 반영) |
 | `app.reset` | - | 릴레이·경보·카운터 초기화 (시나리오 반복 실행 전에) |
 
+### OTA (펌웨어 다운로드)
+
+기기가 이 펌웨어로 돌고 있을 때 **앱 파티션만** 갱신한다.
+부트로더·파티션 테이블까지 바꾸거나 빈 칩에 굽는 것은 OTA 로 할 수 없고,
+웹 콘솔의 *USB 전체 플래시*(ROM 부트로더)를 써야 한다.
+
+| 명령 | 인자 | 설명 |
+|---|---|---|
+| `ota.status` | - | 상태·진행률·가능 여부·파티션 크기·한 조각 최대 크기 |
+| `ota.begin` | `size`, `md5` | 시작. `md5` 는 16진수 32자이거나 빈 문자열(검증 생략) |
+| `ota.data` | `b64` | base64 로 인코딩한 조각 (USB/BLE 경로) |
+| `ota.end` | - | 크기·MD5 검증 후 성공하면 약 0.8초 뒤 재부팅 |
+| `ota.abort` | - | 중단하고 플래시를 놓아 준다 |
+
+`ota.status` 응답:
+
+```json
+{
+  "state": "receiving",     // idle | receiving | success | failed
+  "received": 131072, "total": 943718, "percent": 13,
+  "via": "wifi",            // 어느 채널이 올리고 있는가
+  "otaCapable": true,       // OTA 파티션이 있는가
+  "maxSize": 3342336,       // 대상 파티션 크기
+  "maxChunk": 2976          // ota.data 한 번에 보낼 수 있는 원본 바이트 수
+}
+```
+
+**WiFi 는 WebSocket 바이너리 프레임**으로 보내는 편이 훨씬 빠르다.
+`ota.begin` 이후의 바이너리 프레임은 전부 OTA 데이터로 해석한다
+(base64 로 부풀릴 필요가 없어 전송량이 3분의 4에서 1로 준다).
+WebSocket 은 순서를 보장하므로 프레임을 연달아 보낸 뒤 `ota.end` 를 보내면 된다.
+
+동작 규칙:
+
+* 시작 전에 파티션 유무와 크기를 확인하고, 안 맞으면 시작 자체를 거부한다.
+* `md5` 를 주면 장치가 `Update.setMD5()` 로 검증한다. 형식이 틀리면
+  **조용히 검증을 건너뛰지 않고 실패**시킨다.
+* 선언한 크기보다 많이 보내거나 적게 보내고 끝내면 실패한다.
+* 15초 동안 데이터가 없으면 스스로 중단하고 플래시를 놓아 준다.
+
+이벤트: `ota.begin`, `ota.progress`(`{received,total,percent,via}`),
+`ota.done`(`{ok, error?, rebooting?}`).
+
 ### 네트워크
 
 | 명령 | 인자 | 설명 |
@@ -122,6 +166,7 @@ ADC 는 노이즈 때문에 **32 이상 변했을 때만** 보고한다.
 | `hello` | 채널이 연결된 직후 | `sys.info` 와 동일 + `via`(채널 이름) |
 | `pin.state` | 핀 상태를 바꾸는 명령이 처리될 때 | 핀 상태 객체 |
 | `pin.change` | 감시 중인 핀 값이 바뀔 때 | `{pin, value, forced, mode}` |
+| `ota.begin` / `ota.progress` / `ota.done` | 펌웨어 업로드 중 | 위 OTA 절 참고 |
 | `app.status` | 테스트 대상 로직 상태가 바뀔 때 | `app.status` 결과와 동일 |
 | `io.reset` / `force.clearAll` | 일괄 초기화 시 | - |
 | `wifi.connected` | STA 접속 성공 | `{ip, ssid, host}` |
@@ -134,6 +179,7 @@ ADC 는 노이즈 때문에 **32 이상 변했을 때만** 보고한다.
 | 브라우저 API | Web Serial | Web Bluetooth | WebSocket |
 | 주소/식별 | 시리얼 포트 선택 | `ESPS3-TEST-xxxx` 광고 | `ws://<IP>:81/` |
 | 메시지 경계 | `\n` 으로 구분 | MTU 청크를 재조립 | 메시지 = 한 줄 |
+| OTA 데이터 | base64 (`ota.data`) | base64 (`ota.data`) | **바이너리 프레임** |
 | 속도 | 빠름 | 느림(20바이트 단위 쓰기) | 빠름 |
 | 비고 | 보안 컨텍스트 필요 | 보안 컨텍스트 필요, 응답 타임아웃 12초 | https 페이지에서는 차단됨 |
 

@@ -95,6 +95,18 @@ export class WifiTransport extends Transport {
     this.ws.send(line);
   }
 
+  // 펌웨어는 바이너리 프레임을 OTA 데이터로만 해석한다.
+  get supportsBinary() { return true; }
+
+  async sendBinary(bytes) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error('WebSocket 이 열려 있지 않습니다');
+    }
+    this.ws.send(bytes);
+  }
+
+  get bufferedAmount() { return this.ws ? this.ws.bufferedAmount : 0; }
+
   async disconnect() {
     this.connected = false;
     try { this.ws?.close(); } catch { /* 무시 */ }

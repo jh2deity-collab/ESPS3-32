@@ -31,6 +31,23 @@ export class Transport {
   async disconnect() {}
   async send(_line) { throw new Error('미구현'); }
 
+  /**
+   * 원본 바이트를 그대로 보낼 수 있는가.
+   * OTA 는 이게 가능하면 base64 로 부풀리지 않고 바로 보낸다.
+   */
+  get supportsBinary() { return false; }
+
+  async sendBinary(_bytes) { throw new Error('이 연결 방식은 바이너리 전송을 지원하지 않습니다'); }
+
+  /** 아직 보내지 못하고 쌓인 바이트 수 (흐름 제어용) */
+  get bufferedAmount() { return 0; }
+
+  /**
+   * 한 번에 보낼 수 있는 텍스트 크기 힌트.
+   * BLE 처럼 쪼개 보내는 전송은 작게 잡아 반응성을 지킨다.
+   */
+  get maxTextChunk() { return 4096; }
+
   /** 연결 정보 요약 (상태바 표시용) */
   describe() { return this.label; }
 
