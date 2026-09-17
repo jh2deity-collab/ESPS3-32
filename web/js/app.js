@@ -1665,6 +1665,11 @@ function checkEnvironment() {
 }
 
 function init() {
+  // 모듈이 여기까지 왔다는 것은 정상 부팅이라는 뜻이다. 실패 안내를 치운다.
+  clearTimeout(window.__bootTimer);
+  const boot = document.getElementById('bootFail');
+  if (boot) boot.remove();
+
   buildTransportSelector();
   buildConnOptions();
   wireUi();
