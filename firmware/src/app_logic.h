@@ -31,6 +31,7 @@ struct AppLogicConfig {
 namespace applogic {
 void begin();
 void loop();
+void reset();                       // 릴레이/경보/카운터를 초기 상태로 되돌린다
 AppLogicConfig& config();
 bool applyConfig(const AppLogicConfig& cfg, String& err);
 

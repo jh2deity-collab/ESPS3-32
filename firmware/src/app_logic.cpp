@@ -48,6 +48,18 @@ bool applyConfig(const AppLogicConfig& cfg, String& err) {
   return true;
 }
 
+void reset() {
+  g_relay = false;
+  g_alarm = false;
+  g_pressCount = 0;
+  g_lastRawBtn = -1;
+  g_stableBtn  = -1;
+  g_blinkOn    = false;
+  String err;
+  if (pinUsed(g_cfg.relayPin)) io::write((uint8_t)g_cfg.relayPin, 0, err);
+  if (pinUsed(g_cfg.alarmPin)) io::write((uint8_t)g_cfg.alarmPin, 0, err);
+}
+
 void loop() {
   if (!g_cfg.enabled) return;
   uint32_t now = millis();

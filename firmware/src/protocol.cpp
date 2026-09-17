@@ -362,6 +362,11 @@ void handleLine(const char* line, ITransport* src) {
   } else if (!strcmp(cmd, "app.status")) {
     fillAppStatus(r);
 
+  } else if (!strcmp(cmd, "app.reset")) {
+    applogic::reset();
+    fillAppStatus(r);
+    broadcastEvent("app.status", [](JsonObject d) { fillAppStatus(d); });
+
   } else if (!strcmp(cmd, "app.config")) {
     AppLogicConfig c = applogic::config();
     if (args["enabled"].is<bool>())    c.enabled         = args["enabled"];
