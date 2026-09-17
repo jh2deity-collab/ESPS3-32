@@ -640,6 +640,7 @@ function drawChart() {
   g.lineWidth = 2;
   g.lineJoin = 'round';
   g.lineCap = 'round';
+  const endPoints = [];
   series.forEach((s) => {
     g.strokeStyle = s.color;
     g.beginPath();
@@ -651,25 +652,60 @@ function drawChart() {
     });
     g.stroke();
 
-    // 데이터 끝 마커 + 직접 레이블.
-    // 레이블 글자는 본문 잉크색을 쓰고, 계열 구분은 옆의 색 마커가 맡는다.
     const last = s.data[s.data.length - 1];
     if (last) {
-      const lx = x(last.t);
-      const ly = clamp(y(last.v), padT + 4, padT + H - 4);
-      g.fillStyle = s.color;
-      g.beginPath();
-      g.arc(lx, ly, 4, 0, Math.PI * 2);
-      g.fill();
-      g.lineWidth = 2;                       // 겹칠 때를 위한 서피스 링
-      g.strokeStyle = css.getPropertyValue('--surface-2').trim();
-      g.stroke();
-      g.lineWidth = 2;
-      g.fillStyle = css.getPropertyValue('--ink-2').trim();
-      g.textAlign = 'left';
-      g.fillText(`GPIO${s.pin}`, Math.min(lx + 8, padL + W + 4), ly);
+      endPoints.push({
+        pin: s.pin, color: s.color,
+        x: x(last.t),
+        y: clamp(y(last.v), padT + 4, padT + H - 4),
+      });
     }
   });
+
+  // 데이터 끝 마커 + 직접 레이블.
+  // 값이 비슷한 계열끼리 레이블이 포개지면 읽을 수 없으므로, 마커는 제 위치에
+  // 두고 글자만 세로로 밀어 최소 간격을 확보한다.
+  const LABEL_GAP = 13;
+  endPoints.sort((a, b) => a.y - b.y);
+  endPoints.forEach((p, i) => {
+    p.labelY = i === 0 ? p.y : Math.max(p.y, endPoints[i - 1].labelY + LABEL_GAP);
+  });
+  // 아래로 밀다가 그래프를 벗어나면 위로 되돌린다
+  for (let i = endPoints.length - 1; i >= 0; i--) {
+    const p = endPoints[i];
+    const limit = i === endPoints.length - 1
+      ? padT + H - 2
+      : endPoints[i + 1].labelY - LABEL_GAP;
+    p.labelY = Math.min(p.labelY, limit);
+    p.labelY = Math.max(p.labelY, padT + 6);
+  }
+
+  const surface = css.getPropertyValue('--surface-2').trim();
+  const inkLabel = css.getPropertyValue('--ink-2').trim();
+  endPoints.forEach((p) => {
+    g.fillStyle = p.color;
+    g.beginPath();
+    g.arc(p.x, p.y, 4, 0, Math.PI * 2);
+    g.fill();
+    g.lineWidth = 2;                       // 겹칠 때를 위한 서피스 링
+    g.strokeStyle = surface;
+    g.stroke();
+
+    // 레이블을 밀었으면 마커와 글자를 가는 선으로 이어 준다
+    const lx = Math.min(p.x + 8, padL + W + 4);
+    if (Math.abs(p.labelY - p.y) > 2) {
+      g.strokeStyle = p.color;
+      g.lineWidth = 1;
+      g.beginPath();
+      g.moveTo(p.x + 4, p.y);
+      g.lineTo(lx - 2, p.labelY);
+      g.stroke();
+    }
+    g.fillStyle = inkLabel;
+    g.textAlign = 'left';
+    g.fillText(`GPIO${p.pin}`, lx, p.labelY);
+  });
+  g.lineWidth = 2;
 
   // 호버 크로스헤어
   if (chartState.hoverX != null) {
@@ -1115,7 +1151,11 @@ function showProgress(on) {
 
 function setProgress(percent, detail, kind) {
   const pct = clamp(Math.round(percent), 0, 100);
-  $('#dlBar').style.width = `${pct}%`;
+  const bar0 = $('#dlBar');
+  // 끝난 상태는 즉시 반영한다. 전환 애니메이션이 남아 있으면 숫자는 100% 인데
+  // 막대는 따라가는 중이라 어긋나 보인다(빠른 업로드에서 특히 눈에 띈다).
+  bar0.style.transition = kind ? 'none' : '';
+  bar0.style.width = `${pct}%`;
   $('#dlPct').textContent = `${pct}%`;
   $('#dlDetail').textContent = detail || '';
   const bar = $('#dlProgress .progress');
