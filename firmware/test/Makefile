@@ -4,14 +4,15 @@ CXX      ?= g++
 CXXFLAGS ?= -std=c++17 -Wall -Wextra -Wno-unused-parameter -O1 -g
 INCLUDES  = -Istub -I../include -I../src
 SRC       = test_logic.cpp stub/stub.cpp ../src/io_manager.cpp ../src/app_logic.cpp
-BIN       = /tmp/esps3_test_logic
+BIN       = build/test_logic
 
 .PHONY: test clean
 test: $(BIN)
 	@$(BIN)
 
 $(BIN): $(SRC) stub/Arduino.h ../src/io_manager.h ../src/app_logic.h
+	@mkdir -p build
 	@$(CXX) $(CXXFLAGS) $(INCLUDES) $(SRC) -o $@
 
 clean:
-	@rm -f $(BIN)
+	@rm -rf build

@@ -17,6 +17,9 @@ Thumbs.db
 node_modules/
 npm-debug.log*
 
+# 호스트 테스트 빌드 산출물
+firmware/test/build/
+
 # 로그/임시
 *.log
 *.bin.bak

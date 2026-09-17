@@ -183,6 +183,10 @@ function onOpen({ description }) {
   $('#statTransport').textContent = description;
   setStatus('연결되었습니다', 'ok');
   banner(null);
+  if (dev.transportId === 'ble' && state.pollMs && state.pollMs < 2000) {
+    state.pollMs = 2000;                     // BLE 는 대역폭이 좁다
+    $('#pollRate').value = '2000';
+  }
   startPolling();
   refreshAll();
 }
@@ -495,7 +499,10 @@ async function refreshPin(pin) {
 
 async function refreshAll() {
   if (!dev.connected) return;
-  const r = await dev.try('io.snapshot', { all: true });
+  // BLE 는 20바이트씩 쪼개 보내므로 전체 핀 스냅샷이 느리다.
+  // 그 경우에는 설정·강제·감시 중인 핀만 받는다(나머지는 어차피 'disabled').
+  const args = dev.transportId === 'ble' ? {} : { all: true };
+  const r = await dev.try('io.snapshot', args);
   if (!r.ok) return;
   r.result.pins.forEach((s) => {
     const prev = state.pins.get(s.pin) || {};

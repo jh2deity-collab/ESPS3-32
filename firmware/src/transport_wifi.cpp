@@ -187,8 +187,9 @@ void TransportWiFi::loop() {
   // 포트 80: 장치 정보 페이지(연결 주소 확인용)
   WiFiClient c = s_http.available();
   if (c) {
+    // 여기서 오래 기다리면 WebSocket 처리까지 함께 멈춘다. 짧게만 기다린다.
     uint32_t t0 = millis();
-    while (c.connected() && !c.available() && millis() - t0 < 500) delay(1);
+    while (c.connected() && !c.available() && millis() - t0 < 150) delay(1);
     while (c.available()) c.read();          // 요청 헤더는 버린다
 
     String body = String("{\"device\":\"") + DEVICE_MODEL +
