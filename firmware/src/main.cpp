@@ -9,10 +9,20 @@
 #include "config.h"
 #include "io_manager.h"
 #include "app_logic.h"
+#include "ota_manager.h"
 #include "protocol.h"
 #include "transport_usb.h"
 #include "transport_ble.h"
 #include "transport_wifi.h"
+
+static void onOtaProgress(uint32_t received, uint32_t total) {
+  protocol::broadcastEvent("ota.progress", [received, total](JsonObject d) {
+    d["received"] = received;
+    d["total"]    = total;
+    d["percent"]  = ota::percent();
+    d["via"]      = ota::via();
+  });
+}
 
 static void onPinChanged(uint8_t pin, int value, bool forced) {
   protocol::broadcastEvent("pin.change", [pin, value, forced](JsonObject d) {
@@ -33,6 +43,9 @@ void setup() {
   io::onPinChange(onPinChanged);
   applogic::begin();
 
+  ota::begin();
+  ota::onProgress(onOtaProgress);
+
   // 3) BLE - Nordic UART Service 로 광고 시작
   g_ble.begin();
   protocol::registerTransport(&g_ble);
@@ -47,6 +60,7 @@ void loop() {
   g_ble.loop();
   g_wifi.loop();
 
+  ota::loop();         // 업로드 타임아웃 감시 + 완료 후 재부팅
   io::loop();          // 펄스 만료 + 감시 핀 폴링(변화 시 이벤트 브로드캐스트)
   applogic::loop();    // 테스트 대상 로직 (강제 입력이 여기에 반영된다)
 

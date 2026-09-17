@@ -1,5 +1,6 @@
 #include "transport_wifi.h"
 #include "protocol.h"
+#include "ota_manager.h"
 
 #include <WiFi.h>
 #include <ESPmDNS.h>
@@ -132,6 +133,27 @@ void TransportWiFi::onWsEvent(uint8_t num, int type, uint8_t* payload, size_t le
     case WStype_DISCONNECTED:
       if (clients_) clients_--;
       break;
+
+    // 바이너리 프레임은 OTA 데이터 전용. base64 로 부풀리지 않아 가장 빠르다.
+    case WStype_BIN: {
+      if (!ota::isReceiving()) {
+        activeClient = (int32_t)num;
+        protocol::broadcastEvent("ota.done", [](JsonObject d) {
+          d["ok"] = false;
+          d["error"] = "OTA 를 시작하지 않은 채로 바이너리 데이터가 들어왔습니다";
+        });
+        activeClient = -1;
+        break;
+      }
+      String e;
+      if (!ota::write(payload, length, e)) {
+        protocol::broadcastEvent("ota.done", [&e](JsonObject d) {
+          d["ok"] = false;
+          d["error"] = e;
+        });
+      }
+      break;
+    }
 
     case WStype_TEXT: {
       // WebSocket 은 메시지 경계가 보장되므로 그대로 한 줄로 취급한다.

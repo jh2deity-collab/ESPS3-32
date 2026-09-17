@@ -3,16 +3,24 @@
 CXX      ?= g++
 CXXFLAGS ?= -std=c++17 -Wall -Wextra -Wno-unused-parameter -O1 -g
 INCLUDES  = -Istub -I../include -I../src
-SRC       = test_logic.cpp stub/stub.cpp ../src/io_manager.cpp ../src/app_logic.cpp
-BIN       = build/test_logic
+COMMON    = stub/stub.cpp
+LOGIC_SRC = test_logic.cpp $(COMMON) ../src/io_manager.cpp ../src/app_logic.cpp
+OTA_SRC   = test_ota.cpp   $(COMMON) ../src/ota_manager.cpp
+LOGIC_BIN = build/test_logic
+OTA_BIN   = build/test_ota
 
 .PHONY: test clean
-test: $(BIN)
-	@$(BIN)
+test: $(LOGIC_BIN) $(OTA_BIN)
+	@$(LOGIC_BIN)
+	@$(OTA_BIN)
 
-$(BIN): $(SRC) stub/Arduino.h ../src/io_manager.h ../src/app_logic.h
+$(LOGIC_BIN): $(LOGIC_SRC) stub/Arduino.h ../src/io_manager.h ../src/app_logic.h
 	@mkdir -p build
-	@$(CXX) $(CXXFLAGS) $(INCLUDES) $(SRC) -o $@
+	@$(CXX) $(CXXFLAGS) $(INCLUDES) $(LOGIC_SRC) -o $@
+
+$(OTA_BIN): $(OTA_SRC) stub/Arduino.h stub/Update.h stub/esp_ota_ops.h ../src/ota_manager.h
+	@mkdir -p build
+	@$(CXX) $(CXXFLAGS) $(INCLUDES) $(OTA_SRC) -o $@
 
 clean:
 	@rm -rf build

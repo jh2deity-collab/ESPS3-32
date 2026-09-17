@@ -1,12 +1,15 @@
 #include "protocol.h"
 #include "io_manager.h"
 #include "app_logic.h"
+#include "ota_manager.h"
 #include "transport_usb.h"
 #include "transport_ble.h"
 #include "transport_wifi.h"
 
 #include <WiFi.h>
 #include <esp_system.h>
+#include <esp_ota_ops.h>
+#include <esp_partition.h>
 
 namespace {
 
@@ -124,6 +127,42 @@ static void fillSysInfo(JsonObject r) {
   net["clients"] = g_wifi.clientCount();
 
   r["bleName"] = g_ble.deviceName();
+
+  // 지금 어느 파티션에서 돌고 있고, OTA 가 가능한지
+  JsonObject part = r["partition"].to<JsonObject>();
+  const esp_partition_t* running = esp_ota_get_running_partition();
+  const esp_partition_t* next    = esp_ota_get_next_update_partition(nullptr);
+  if (running) {
+    part["running"] = running->label;
+    part["size"]    = (uint32_t)running->size;
+  }
+  part["otaCapable"] = (next != nullptr);
+  if (next) {
+    part["next"]     = next->label;
+    part["nextSize"] = (uint32_t)next->size;
+  }
+}
+
+static void fillOtaStatus(JsonObject r) {
+  const char* st = "idle";
+  switch (ota::state()) {
+    case OTA_RECEIVING: st = "receiving"; break;
+    case OTA_SUCCESS:   st = "success";   break;
+    case OTA_FAILED:    st = "failed";    break;
+    default:            st = "idle";      break;
+  }
+  r["state"]    = st;
+  r["received"] = ota::received();
+  r["total"]    = ota::total();
+  r["percent"]  = ota::percent();
+  r["via"]      = ota::via();
+  if (ota::state() == OTA_FAILED) r["error"] = ota::lastError();
+
+  const esp_partition_t* next = esp_ota_get_next_update_partition(nullptr);
+  r["otaCapable"] = (next != nullptr);
+  if (next) r["maxSize"] = (uint32_t)next->size;
+  // 한 줄에 담을 수 있는 base64 조각의 안전 상한(웹이 조각 크기를 정할 때 쓴다)
+  r["maxChunk"] = (uint32_t)((MAX_LINE_LEN - 128) / 4 * 3);
 }
 
 static void fillWifiStatus(JsonObject r) {
@@ -416,6 +455,53 @@ void handleLine(const char* line, ITransport* src) {
       }
       WiFi.scanDelete();
     }
+
+  // ---- OTA (펌웨어 다운로드) -----------------------------------------------
+  } else if (!strcmp(cmd, "ota.status")) {
+    fillOtaStatus(r);
+
+  } else if (!strcmp(cmd, "ota.begin")) {
+    {
+      uint32_t size = args["size"] | 0u;
+      String   md5  = args["md5"] | "";
+      if (!ota::start(size, md5, src->name(), err)) { replyError(src, id, err); return; }
+      fillOtaStatus(r);
+      broadcastEvent("ota.begin", [](JsonObject d) { fillOtaStatus(d); });
+    }
+
+  } else if (!strcmp(cmd, "ota.data")) {
+    {
+      JsonVariantConst b64 = args["b64"];
+      if (!b64.is<const char*>()) { replyError(src, id, "'b64' 인자가 필요합니다"); return; }
+      const char* p = b64.as<const char*>();
+      if (!ota::writeBase64(p, strlen(p), err)) { replyError(src, id, err); return; }
+      // 응답은 최대한 짧게 - 이 왕복이 업로드 속도를 좌우한다
+      r["n"] = ota::received();
+    }
+
+  } else if (!strcmp(cmd, "ota.end")) {
+    if (!ota::finish(err)) {
+      broadcastEvent("ota.done", [](JsonObject d) {
+        d["ok"] = false;
+        d["error"] = ota::lastError();
+      });
+      replyError(src, id, err);
+      return;
+    }
+    fillOtaStatus(r);
+    r["rebooting"] = true;
+    broadcastEvent("ota.done", [](JsonObject d) {
+      d["ok"] = true;
+      d["rebooting"] = true;
+    });
+
+  } else if (!strcmp(cmd, "ota.abort")) {
+    ota::cancel("사용자가 취소했습니다");
+    fillOtaStatus(r);
+    broadcastEvent("ota.done", [](JsonObject d) {
+      d["ok"] = false;
+      d["error"] = ota::lastError();
+    });
 
   } else if (!strcmp(cmd, "ble.status")) {
     r["name"]      = g_ble.deviceName();

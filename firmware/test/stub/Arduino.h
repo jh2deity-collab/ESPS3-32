@@ -30,6 +30,8 @@ class String {
 
   const char* c_str() const { return s_.c_str(); }
   size_t length() const { return s_.size(); }
+  char operator[](size_t i) const { return i < s_.size() ? s_[i] : '\0'; }
+  char charAt(size_t i) const { return (*this)[i]; }
   String& operator+=(const String& o) { s_ += o.s_; return *this; }
   friend String operator+(String a, const String& b) { a += b; return a; }
   bool operator==(const char* o) const { return s_ == o; }
@@ -86,3 +88,11 @@ inline void ledcWrite(uint8_t ch, uint32_t duty) { g_ledcDuty[ch] = (int)duty; }
 inline void fakeSetLevel(uint8_t pin, int v)  { g_fakeGpio[pin].level = v ? 1 : 0; }
 inline void fakeSetAnalog(uint8_t pin, int v) { g_fakeGpio[pin].analog = v; }
 inline void fakeAdvance(uint32_t ms)          { g_fakeMillis += ms; }
+
+// --- ESP 객체 (재부팅 요청만 기록한다) --------------------------------------
+extern bool g_fakeRestarted;
+struct EspClass {
+  void restart() { g_fakeRestarted = true; }
+  uint64_t getEfuseMac() { return 0x001122334455ULL; }
+};
+extern EspClass ESP;

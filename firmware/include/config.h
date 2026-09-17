@@ -27,9 +27,14 @@
 #define BLE_CHAR_TX_UUID    "6e400003-b5a3-f393-e0a9-e50e24dcca9e"  // notify (장치 -> 웹)
 
 // --- 프로토콜 --------------------------------------------------------------
-#define MAX_LINE_LEN        1024             // JSON 한 줄 최대 길이
+// JSON 한 줄 최대 길이. OTA 는 base64 조각을 이 안에 실어 보내므로,
+// 이 값이 한 번에 보낼 수 있는 펌웨어 조각 크기를 결정한다.
+#define MAX_LINE_LEN        4096
 #define MAX_PINS            49               // GPIO0 ~ GPIO48
 #define MAX_LEDC_CHANNELS   8                // ESP32-S3 LEDC 채널 수
+
+// --- OTA ---------------------------------------------------------------
+#define OTA_TIMEOUT_MS      15000            // 이 시간 동안 데이터가 없으면 중단
 
 // --- 입력 폴링 -------------------------------------------------------------
 #define DEFAULT_WATCH_INTERVAL_MS   50
