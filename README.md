@@ -46,20 +46,65 @@ python3 tools/serve.py          # http://localhost:8000 이 열린다
 장치가 아직 없다면 연결 방식에서 **시뮬레이터**를 고르고 [연결]을 누르면
 모든 기능을 그대로 사용해 볼 수 있다.
 
-### 2. 펌웨어 올리기
+### 2. 펌웨어 빌드와 업로드
 
-[PlatformIO](https://platformio.org/) 가 필요하다.
+[PlatformIO Core](https://platformio.org/) 가 필요하다.
 
 ```bash
-cd firmware
-pio run -t upload          # 빌드 + 업로드
-pio device monitor         # (선택) 로그 확인
+pip install platformio        # 처음 한 번
+
+pio run -d firmware           # 빌드
+pio run -d firmware -t upload # 빌드 + 업로드
+pio device monitor            # (선택) 로그 확인
 ```
+
+첫 빌드는 툴체인과 Arduino 코어(합쳐서 수백 MB)를 받느라 몇 분 걸리고,
+그다음부터는 빠르다. 산출물은 여기에 생긴다.
+
+```
+firmware/.pio/build/esp32s3-n8r2/
+  firmware.bin     애플리케이션        → 0x10000  (OTA 로 올릴 때도 이 파일)
+  bootloader.bin   부트로더            → 0x0
+  partitions.bin   파티션 테이블       → 0x8000
+```
+
+케이블만 꽂혀 있으면 `-t upload` 가 제일 편하고, PlatformIO 를 깔기 어려운
+자리에서는 이 파일들을 웹 콘솔의 **다운로드** 탭으로 구우면 된다.
+
+현재 사용량(espressif32 6.9.0 / Arduino core 2.0.17 기준):
+
+```
+RAM:   26.6%  (87 KB / 320 KB)
+Flash: 42.0%  (1.34 MB / 3.19 MB — app 파티션)
+```
+
+`build_src_flags` 로 이 프로젝트 소스에만 `-Wall -Wextra` 를 걸어 두었다
+(프레임워크 경고까지 켜면 소음이 너무 커진다). 현재 경고 0건이며,
+새로 짠 코드가 경고를 내면 바로 보인다.
 
 보드는 `esp32-s3-devkitc-1` 기준이며, N8R2 에 맞춰
 8MB Flash(QIO) + 2MB Quad PSRAM(`qio_qspi`) 로 설정되어 있다.
 다른 모듈(N8R8 등)이면 `platformio.ini` 의 `board_build.arduino.memory_type`
-을 바꿔야 한다.
+을 `qio_opi` 로 바꿔야 한다.
+
+> 파티션은 `default_8MB.csv` (app0/app1 각 3.1MB + SPIFFS)를 쓴다.
+> **OTA 는 app0/app1 두 칸이 있어야 동작하므로**, 파티션 표를 바꿀 때는
+> OTA 가능 여부를 함께 확인할 것(웹 콘솔 **장치** 탭에 표시된다).
+
+#### 사람마다 다른 설정은 `firmware/local/` 에
+
+`platformio.ini` 는 `extra_configs = local/*.ini` 를 두고 있어서,
+`firmware/local/` 에 넣은 `.ini` 가 자동으로 합쳐진다. 이 폴더는 커밋되지
+않으므로 포트 이름이나 사내 미러 설정을 여기에 둔다.
+
+```bash
+mkdir -p firmware/local
+cp firmware/local.example/upload-port.ini firmware/local/   # 포트 고정
+```
+
+패키지 레지스트리를 막아 둔 망분리 환경이라면
+`firmware/local.example/offline-packages.ini` 를 참고해 툴체인과 코어를
+업스트림 GitHub 릴리스에서 직접 받도록 고정할 수 있다.
 
 첫 업로드 후 장치는 이렇게 동작한다.
 
@@ -262,6 +307,9 @@ tools/               로컬 서버 · 자체 점검 스크립트
 ./tools/test-all.sh
 ```
 
+셋을 차례로 돌린다. PlatformIO 가 `PATH` 에 없으면 3번은 건너뛴다
+(다른 곳에 있으면 `PIO=/경로/pio ./tools/test-all.sh`).
+
 * `firmware/test` — 장치에 올라가는 `io_manager.cpp` / `app_logic.cpp` /
   `ota_manager.cpp` 를 Arduino 스텁 위에서 그대로 컴파일해 강제 입력
   우선순위, 펄스 만료, 감시 이벤트, 디바운스, 임계 경보와 OTA 상태 기계
@@ -270,6 +318,13 @@ tools/               로컬 서버 · 자체 점검 스크립트
   시나리오 엔진을 돌려 프로토콜 왕복을 검증한다. OTA 는 시뮬레이터가
   받은 바이트의 MD5 를 직접 계산하므로, 전송 중 한 바이트만 바꿔도
   검증에서 걸리는지까지 확인한다. (node 필요)
+* `pio run -d firmware` — 진짜 크로스 컴파일. 위 둘이 통과해도 여기서
+  깨질 수 있으므로(장치 전용 API), 펌웨어를 고쳤으면 꼭 함께 돌릴 것.
+
+GitHub Actions(`.github/workflows/build.yml`)가 푸시마다 같은 셋을 돌리고,
+빌드 산출물(`firmware.bin`/`bootloader.bin`/`partitions.bin`)을 artifact 로
+올린다. 보드는 없지만 펌웨어만 받아서 굽고 싶을 때 그 artifact 를 내려받아
+웹 콘솔의 **다운로드** 탭에 넣으면 된다.
 
 ## 라이선스
 

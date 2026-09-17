@@ -4,6 +4,9 @@
 .piolibdeps/
 firmware/.pio/
 
+# 로컬 전용 PlatformIO 설정 (업로드 포트, 패키지 고정 등)
+firmware/local/
+
 # IDE
 .vscode/
 .idea/

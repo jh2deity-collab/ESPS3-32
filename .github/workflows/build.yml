@@ -1,0 +1,65 @@
+name: build
+
+# 펌웨어가 실제로 빌드되는지, 로직/프로토콜 점검이 통과하는지 확인한다.
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  firmware:
+    name: 펌웨어 빌드 (ESP32-S3 N8R2)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # 툴체인은 수백 MB라 캐시가 빌드 시간을 크게 줄인다
+      - name: PlatformIO 캐시
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-${{ runner.os }}-${{ hashFiles('firmware/platformio.ini') }}
+          restore-keys: pio-${{ runner.os }}-
+
+      - name: PlatformIO 설치
+        run: pip install --upgrade platformio
+
+      - name: 빌드
+        run: pio run -d firmware
+
+      - name: 플래시 사용량 요약
+        run: pio run -d firmware -t size | tail -20
+
+      # 실제 보드가 없어도 산출물을 받아 웹 콘솔의 '다운로드' 탭으로 구울 수 있다
+      - name: 산출물 업로드
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-esp32s3-n8r2
+          path: |
+            firmware/.pio/build/esp32s3-n8r2/firmware.bin
+            firmware/.pio/build/esp32s3-n8r2/bootloader.bin
+            firmware/.pio/build/esp32s3-n8r2/partitions.bin
+          if-no-files-found: error
+
+  tests:
+    name: 로직·프로토콜 점검
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 펌웨어 로직 테스트 (호스트 컴파일)
+        run: make -C firmware/test test
+
+      - name: 웹 콘솔 자체 점검
+        run: node tools/selftest.mjs
