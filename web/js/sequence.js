@@ -15,7 +15,7 @@
 //    read 6                 현재 값을 로그에 남긴다
 //    wait 500               대기(ms)
 //    expect 7 == 1          검증 (== != > < >= <=)
-//    expect adc 3 > 2000    ADC 원시값 검증
+//    expect adc 6 > 2000    ADC 원시값 검증
 //    expect app.relay == 1  테스트 대상 로직 상태 검증 (relay/alarm/presses)
 //    log 메시지
 //    reset                  모든 핀 초기화
@@ -383,23 +383,23 @@ unforce 4
 log 강제 입력 테스트 완료`,
 
   '아날로그 임계 경보': `# ADC 값을 주입해 경보 출력이 뜨는지 확인한다
-# '앱 로직' 탭에서 센서=GPIO3, 경보=GPIO6, 임계=3000 으로 켜 두세요.
+# '앱 로직' 탭에서 센서=GPIO6, 경보=GPIO7, 임계=3000 으로 켜 두세요.
 log 아날로그 경보 테스트
 appreset
-force 3 1000
+force 6 1000
 wait 150
 expect app.alarm == 0
-expect 6 == 0
+expect 7 == 0
 
-force 3 3500
+force 6 3500
 wait 150
 expect app.alarm == 1
-expect 6 == 1
+expect 7 == 1
 
-force 3 500
+force 6 500
 wait 150
 expect app.alarm == 0
-unforce 3
+unforce 6
 log 완료`,
 
   'PWM 스윕': `# PWM duty 를 단계적으로 올려 LED 밝기를 확인한다

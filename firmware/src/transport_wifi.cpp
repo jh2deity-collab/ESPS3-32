@@ -151,8 +151,10 @@ void TransportWiFi::onWsEvent(uint8_t num, int type, uint8_t* payload, size_t le
 
 void TransportWiFi::sendLine(const String& line) {
   if (!serversUp_ || clients_ == 0) return;
-  if (activeClient >= 0) s_ws.sendTXT((uint8_t)activeClient, line);
-  else                   s_ws.broadcastTXT(line);
+  // String& 를 받는 오버로드는 라이브러리 버전마다 const 여부가 달라서,
+  // 어느 버전에나 있는 (const char*, length) 오버로드를 쓴다.
+  if (activeClient >= 0) s_ws.sendTXT((uint8_t)activeClient, line.c_str(), line.length());
+  else                   s_ws.broadcastTXT(line.c_str(), line.length());
 }
 
 // ---------------------------------------------------------------------------

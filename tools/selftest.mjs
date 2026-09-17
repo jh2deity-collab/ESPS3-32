@@ -67,12 +67,12 @@ st = await dev.cmd('io.read', { pin: 4 });
 check('강제 펄스 만료 후 자동 복귀', st.forced === false && st.value === 1);
 
 console.log('\n[5] ADC 주입');
-await dev.cmd('io.config', { pin: 3, mode: 'adc' });
-await dev.cmd('force.set', { pin: 3, value: 3300 });
-const adc = await dev.cmd('io.adc', { pin: 3 });
+await dev.cmd('io.config', { pin: 6, mode: 'adc' });
+await dev.cmd('force.set', { pin: 6, value: 3300 });
+const adc = await dev.cmd('io.adc', { pin: 6 });
 check('ADC 주입값 반영', adc.raw === 3300 && adc.forced === true);
 check('mV 환산', Math.abs(adc.mv - Math.round((3300 * 3300) / 4095)) <= 1, String(adc.mv));
-await dev.cmd('force.clear', { pin: 3 });
+await dev.cmd('force.clear', { pin: 6 });
 
 console.log('\n[6] 감시 이벤트');
 events.length = 0;
@@ -86,7 +86,7 @@ console.log('\n[7] 앱 로직 + 강제 입력 연동');
 await dev.cmd('io.reset');
 await dev.cmd('app.config', {
   enabled: true, buttonPin: 4, relayPin: 5, ledPin: 48,
-  sensorPin: 3, alarmPin: 6, activeLow: true, debounceMs: 20, threshold: 3000,
+  sensorPin: 6, alarmPin: 7, activeLow: true, debounceMs: 20, threshold: 3000,
 });
 await dev.cmd('force.set', { pin: 4, value: 1 });   // 눌리지 않은 상태
 await sleep(120);
@@ -102,11 +102,11 @@ check('버튼 주입 1회 → 릴레이 ON', app.relay === true, JSON.stringify(
 st = await dev.cmd('io.read', { pin: 5 });
 check('릴레이 출력 핀도 HIGH', st.value === 1);
 
-await dev.cmd('force.set', { pin: 3, value: 3500 });  // 임계 초과
+await dev.cmd('force.set', { pin: 6, value: 3500 });  // 임계 초과
 await sleep(150);
 app = await dev.cmd('app.status');
 check('ADC 주입 → 경보 ON', app.alarm === true);
-st = await dev.cmd('io.read', { pin: 6 });
+st = await dev.cmd('io.read', { pin: 7 });
 check('경보 출력 핀 HIGH', st.value === 1);
 await dev.cmd('force.clearAll');
 

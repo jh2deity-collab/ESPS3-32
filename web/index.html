@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESPS3-32 I/O 테스트 콘솔</title>
+<meta name="description" content="ESP32-S3 N8R2 기기의 입출력을 USB·블루투스·WiFi 로 강제 제어하며 테스트하는 웹 콘솔">
+<link rel="stylesheet" href="css/app.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='14'>🔌</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand"><span class="dot" id="brandDot"></span>ESPS3-32 <small>I/O 테스트 콘솔</small></div>
+
+  <div class="conn">
+    <div class="segmented" id="transportSel" role="group" aria-label="연결 방식 선택"></div>
+    <div class="conn-opts" id="connOpts"></div>
+    <button id="btnConnect" class="primary">연결</button>
+    <span class="chip" id="connStatus">미연결</span>
+  </div>
+
+  <button id="btnTheme" class="sm" title="라이트/다크 전환" aria-label="테마 전환">◐ 테마</button>
+</header>
+
+<div class="banner" id="banner" hidden></div>
+
+<main>
+  <!-- ================= 핀 제어 ================= -->
+  <section class="panel">
+    <div class="panel-head">
+      <h2>핀 제어</h2>
+      <span class="chip" id="forcedCount">강제 0</span>
+      <div class="tools">
+        <select id="pinFilter" aria-label="핀 필터">
+          <option value="safe">안전 핀</option>
+          <option value="used">사용 중</option>
+          <option value="adc">ADC 가능</option>
+          <option value="forced">강제 중</option>
+          <option value="all">전체</option>
+        </select>
+        <input id="pinSearch" type="search" placeholder="핀 검색 (예: 4, ADC)" aria-label="핀 검색" style="width:150px">
+        <select id="pollRate" aria-label="상태 갱신 주기">
+          <option value="0">갱신 수동</option>
+          <option value="500">0.5초 갱신</option>
+          <option value="1000" selected>1초 갱신</option>
+          <option value="2000">2초 갱신</option>
+        </select>
+        <button class="sm" id="btnRefresh">새로고침</button>
+        <button class="sm" id="btnUnforceAll">강제 전체 해제</button>
+        <button class="sm danger" id="btnResetPins">핀 초기화</button>
+      </div>
+    </div>
+    <div class="pin-list" id="pinList"></div>
+  </section>
+
+  <!-- ================= 사이드 탭 ================= -->
+  <aside class="panel">
+    <div class="tabs" id="tabs" role="tablist">
+      <button role="tab" data-tab="monitor"  aria-selected="true">모니터</button>
+      <button role="tab" data-tab="console"  aria-selected="false">콘솔</button>
+      <button role="tab" data-tab="sequence" aria-selected="false">시나리오</button>
+      <button role="tab" data-tab="applogic" aria-selected="false">앱 로직</button>
+      <button role="tab" data-tab="device"   aria-selected="false">장치</button>
+    </div>
+
+    <div class="tab-body">
+      <!-- 모니터 -->
+      <div class="tab-page" data-page="monitor" data-active="true">
+        <h3>아날로그 실시간 값 <span style="color:var(--ink-3);font-weight:400">— 감시(watch) 켠 ADC 핀</span></h3>
+        <div class="chart-wrap">
+          <canvas id="adcChart" aria-label="감시 중인 ADC 핀의 실시간 값 그래프"></canvas>
+          <div class="chart-tip" id="chartTip"></div>
+        </div>
+        <div class="legend" id="chartLegend"></div>
+        <div id="chartEmpty" class="empty">ADC 모드로 설정한 핀의 <b>감시</b>를 켜면 여기에 그려집니다.</div>
+
+        <h3>감시 중인 핀</h3>
+        <table class="kv"><tbody id="watchTable"></tbody></table>
+
+        <h3>이벤트</h3>
+        <div class="log" id="eventLog"></div>
+      </div>
+
+      <!-- 콘솔 -->
+      <div class="tab-page" data-page="console">
+        <div class="row">
+          <select id="cmdPreset" class="grow" aria-label="명령 예제"></select>
+          <button class="sm" id="btnClearLog">지우기</button>
+          <label style="font-size:12px;color:var(--ink-2)"><input type="checkbox" id="logAutoScroll" checked> 자동 스크롤</label>
+        </div>
+        <div class="log" id="rawLog"></div>
+        <div class="row">
+          <input id="cmdInput" class="grow" placeholder='{"cmd":"sys.info"}  또는  io.write 2 1' aria-label="명령 입력">
+          <button class="primary" id="btnSend">전송</button>
+        </div>
+        <div class="empty">
+          축약 입력: <code>io.write 2 1</code> → <code>{"cmd":"io.write","args":{"pin":2,"value":1}}</code>
+        </div>
+      </div>
+
+      <!-- 시나리오 -->
+      <div class="tab-page" data-page="sequence">
+        <div class="row">
+          <select id="seqPreset" aria-label="시나리오 예제"></select>
+          <button class="sm" id="btnSeqLoad">불러오기</button>
+          <label style="font-size:12px;color:var(--ink-2)"><input type="checkbox" id="seqStopOnFail"> 실패 시 중단</label>
+          <div class="row end">
+            <button class="primary" id="btnSeqRun">실행</button>
+            <button class="sm" id="btnSeqStop" disabled>중지</button>
+          </div>
+        </div>
+        <textarea id="seqScript" rows="9" spellcheck="false" aria-label="테스트 시나리오"></textarea>
+        <div class="row">
+          <span class="summary" id="seqSummary">시나리오를 작성하거나 예제를 불러오세요.</span>
+          <div class="row end">
+            <button class="sm" id="btnSeqSave">결과 저장(JSON)</button>
+          </div>
+        </div>
+        <div class="results" id="seqResults"></div>
+      </div>
+
+      <!-- 앱 로직 -->
+      <div class="tab-page" data-page="applogic">
+        <h3>테스트 대상 로직 — 강제 입력이 실제로 반영되는지 확인</h3>
+        <div class="empty" style="padding:0 2px">
+          버튼 입력 → 릴레이 토글 → 상태 LED, 그리고 ADC 임계 경보를 펌웨어가 수행합니다.
+          여기서 핀을 지정하고 켠 뒤, 왼쪽에서 <b>강제 입력</b>을 주입해 보세요.
+        </div>
+        <table class="kv">
+          <tbody>
+            <tr><th>사용</th><td><label><input type="checkbox" id="appEnabled"> 로직 실행</label></td></tr>
+            <tr><th>버튼 입력 핀</th><td><input type="number" id="appButtonPin" value="4" min="-1" max="48"></td></tr>
+            <tr><th>릴레이 출력 핀</th><td><input type="number" id="appRelayPin" value="5" min="-1" max="48"></td></tr>
+            <tr><th>상태 LED 핀</th><td><input type="number" id="appLedPin" value="48" min="-1" max="48"></td></tr>
+            <tr><th>센서 입력 핀(ADC)</th><td><input type="number" id="appSensorPin" value="6" min="-1" max="48"></td></tr>
+            <tr><th>경보 출력 핀</th><td><input type="number" id="appAlarmPin" value="7" min="-1" max="48"></td></tr>
+            <tr><th>버튼 극성</th><td><select id="appActiveLow"><option value="1" selected>액티브 로우(풀업)</option><option value="0">액티브 하이(풀다운)</option></select></td></tr>
+            <tr><th>디바운스(ms)</th><td><input type="number" id="appDebounce" value="20" min="0" max="1000"></td></tr>
+            <tr><th>경보 임계(ADC raw)</th><td><input type="number" id="appThreshold" value="3000" min="0" max="4095"></td></tr>
+          </tbody>
+        </table>
+        <div class="row">
+          <button class="primary" id="btnAppApply">적용</button>
+          <button class="sm" id="btnAppReset">상태 초기화</button>
+          <button class="sm" id="btnAppPress">버튼 1회 주입</button>
+        </div>
+        <h3>현재 상태</h3>
+        <table class="kv"><tbody id="appStatus"></tbody></table>
+      </div>
+
+      <!-- 장치 -->
+      <div class="tab-page" data-page="device">
+        <div class="row">
+          <button class="sm" id="btnInfoRefresh">정보 새로고침</button>
+          <button class="sm danger" id="btnReboot">장치 재부팅</button>
+        </div>
+        <table class="kv"><tbody id="infoTable"><tr><td class="empty">연결하면 표시됩니다.</td></tr></tbody></table>
+
+        <h3>WiFi 설정 <span style="color:var(--ink-3);font-weight:400">— USB/블루투스로 연결한 상태에서 설정하면 이후 WiFi 로 붙을 수 있습니다</span></h3>
+        <div class="row">
+          <input id="wifiSsid" placeholder="SSID" class="grow" aria-label="WiFi SSID">
+          <button class="sm" id="btnWifiScan">검색</button>
+        </div>
+        <div class="row">
+          <input id="wifiPass" type="password" placeholder="비밀번호" class="grow" aria-label="WiFi 비밀번호">
+          <button class="primary" id="btnWifiConnect">접속</button>
+        </div>
+        <div class="row">
+          <button class="sm" id="btnWifiStatus">상태 확인</button>
+          <button class="sm" id="btnWifiAp">SoftAP 로 전환</button>
+          <button class="sm danger" id="btnWifiForget">저장된 WiFi 삭제</button>
+        </div>
+        <table class="kv"><tbody id="wifiTable"></tbody></table>
+      </div>
+    </div>
+  </aside>
+</main>
+
+<footer class="statusbar">
+  <span id="statTransport">연결 안 됨</span>
+  <span class="sep">|</span>
+  <span>송신 <b id="statTx">0</b></span>
+  <span>수신 <b id="statRx">0</b></span>
+  <span>오류 <b id="statErr">0</b></span>
+  <span>응답 <b id="statRtt">-</b> ms</span>
+  <span class="sep">|</span>
+  <span id="statMsg">준비됨</span>
+</footer>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

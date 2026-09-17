@@ -26,17 +26,20 @@ class ServerCb : public BLEServerCallbacks {
 
 class RxCb : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic* c) override {
-    std::string v = c->getValue();
-    if (!v.empty()) g_ble.onRxChunk((const uint8_t*)v.data(), v.size());
+    // 코어 2.x 는 std::string, 3.x 는 String 을 돌려준다. 어느 쪽이든
+    // 데이터 포인터와 길이만 꺼내 쓰면 되므로 auto 로 받는다.
+    auto v = c->getValue();
+    size_t n = v.length();
+    if (n) g_ble.onRxChunk((const uint8_t*)v.c_str(), n);
   }
 };
 }  // namespace
 
 void TransportBLE::begin() {
-  uint8_t mac[6];
-  esp_read_mac(mac, ESP_MAC_BT);
+  uint64_t efuse = ESP.getEfuseMac();
   char suffix[8];
-  snprintf(suffix, sizeof(suffix), "%02X%02X", mac[4], mac[5]);
+  snprintf(suffix, sizeof(suffix), "%02X%02X",
+           (uint8_t)((efuse >> 32) & 0xFF), (uint8_t)((efuse >> 40) & 0xFF));
   devName_ = String(DEFAULT_DEV_NAME) + "-" + suffix;
 
   BLEDevice::init(devName_.c_str());
