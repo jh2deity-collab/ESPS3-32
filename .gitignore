@@ -1,0 +1,22 @@
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+firmware/.pio/
+
+# IDE
+.vscode/
+.idea/
+*.code-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node (웹 툴링을 쓸 경우)
+node_modules/
+npm-debug.log*
+
+# 로그/임시
+*.log
+*.bin.bak
